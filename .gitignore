@@ -1,0 +1,29 @@
+# Go binary
+/bin/
+/obj/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Dependency directories
+/vendor/
+
+# Go module files
+go.sum
+
+# IntelliJ IDEA (if using it)
+.idea/
+
+# VS Code (if using it)
+.vscode/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment files
+.env

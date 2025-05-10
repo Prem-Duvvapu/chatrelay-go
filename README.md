@@ -1,1 +1,1 @@
-# chatrelay-go
+# ChatRelay - Slack Bot in Golang
