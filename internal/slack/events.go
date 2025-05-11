@@ -1,8 +1,11 @@
 package slack
 
 import (
+    "bytes"
     "context"
+    "encoding/json"
     "log"
+    "net/http"
     "os"
 
     "github.com/slack-go/slack"
@@ -39,10 +42,17 @@ func StartSlackListener(ctx context.Context) {
                     switch ev := innerEvent.Data.(type) {
                     case *slackevents.AppMentionEvent:
                         log.Println("Bot was mentioned!")
-                        _, _, err := api.PostMessage(ev.Channel, slack.MsgOptionText("Hello, I'm ChatRelay! 👋", false))
+
+                        query := ev.Text
+                        userID := ev.User
+                        channelID := ev.Channel
+
+                        _, _, err := api.PostMessage(channelID, slack.MsgOptionText("Processing your request...", false))
                         if err != nil {
                             log.Printf("Error sending message: %v\n", err)
                         }
+
+                        go forwardToBackend(userID, query, channelID, api)
                     }
                 }
 
@@ -53,4 +63,57 @@ func StartSlackListener(ctx context.Context) {
     }()
 
     client.Run()
+}
+
+func forwardToBackend(userID, query string, channelID string, api *slack.Client) {
+    backendURL := os.Getenv("BACKEND_URL")
+    if backendURL == "" {
+        log.Println("BACKEND_URL is not set")
+        return
+    }
+
+    payload := map[string]string{
+        "user_id": userID,
+        "query":   query,
+    }
+
+    jsonData, err := json.Marshal(payload)
+    if err != nil {
+        log.Printf("Error marshaling request: %v\n", err)
+        return
+    }
+
+    resp, err := http.Post(backendURL, "application/json", bytes.NewBuffer(jsonData))
+    if err != nil {
+        log.Printf("Error sending request to backend: %v\n", err)
+        return
+    }
+    defer resp.Body.Close()
+
+    log.Printf("Sent to backend. Status: %s\n", resp.Status)
+
+    // Now read the SSE stream and send messages to Slack
+    buf := make([]byte, 1024) // Adjust the buffer size if needed
+    for {
+        n, err := resp.Body.Read(buf)
+        if err != nil && err.Error() != "EOF" {
+            log.Printf("Error reading from SSE stream: %v\n", err)
+            break
+        }
+
+        if n > 0 {
+            message := string(buf[:n])
+            log.Printf("Received data from backend: %s", message)
+
+            // Send the message to Slack
+            _, _, err := api.PostMessage(channelID, slack.MsgOptionText(message, false))
+            if err != nil {
+                log.Printf("Error sending message to Slack: %v\n", err)
+            }
+        }
+
+        if err != nil && err.Error() == "EOF" {
+            break
+        }
+    }
 }
