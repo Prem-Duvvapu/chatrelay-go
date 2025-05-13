@@ -11,9 +11,9 @@ import (
     "github.com/slack-go/slack"
     "github.com/slack-go/slack/slackevents"
     "github.com/slack-go/slack/socketmode"
-
     "go.opentelemetry.io/otel"
     "go.opentelemetry.io/otel/attribute"
+    "go.opentelemetry.io/otel/trace"
 )
 
 func StartSlackListener(ctx context.Context) {
@@ -44,18 +44,24 @@ func StartSlackListener(ctx context.Context) {
                     innerEvent := eventsAPIEvent.InnerEvent
                     switch ev := innerEvent.Data.(type) {
                     case *slackevents.AppMentionEvent:
-                        log.Println("Bot was mentioned!")
+                        tracer := otel.Tracer("chatrelay-tracer")
+                        ctx, span := tracer.Start(ctx, "slack_listener",
+                            trace.WithAttributes(
+                                attribute.String("user_id", ev.User),
+                                attribute.String("channel_id", ev.Channel),
+                                attribute.String("query", ev.Text),
+                            ),
+                        )
+                        defer span.End()
 
-                        query := ev.Text
-                        userID := ev.User
-                        channelID := ev.Channel
+                        log.Printf("[Slack] Bot was mentioned by user %s in channel %s", ev.User, ev.Channel)
 
-                        _, _, err := api.PostMessage(channelID, slack.MsgOptionText("Processing your request...", false))
+                        _, _, err := api.PostMessage(ev.Channel, slack.MsgOptionText("Processing your request...", false))
                         if err != nil {
                             log.Printf("Error sending message: %v\n", err)
                         }
 
-                        go forwardToBackend(userID, query, channelID, api)
+                        go forwardToBackend(ctx, ev.User, ev.Text, ev.Channel, api)
                     }
                 }
 
@@ -68,11 +74,19 @@ func StartSlackListener(ctx context.Context) {
     client.Run()
 }
 
-func forwardToBackend(userID, query string, channelID string, api *slack.Client) {
-    ctx := context.Background()
+func forwardToBackend(ctx context.Context, userID, query string, channelID string, api *slack.Client) {
     tracer := otel.Tracer("chatrelay-tracer")
-    ctx, span := tracer.Start(ctx, "forwardToBackend") // ⬅️ start a span
+    ctx, span := tracer.Start(ctx, "forwardToBackend")
     defer span.End()
+
+    span.SetAttributes(
+        attribute.String("user_id", userID),
+        attribute.String("channel_id", channelID),
+        attribute.String("query", query),
+    )
+
+    spanCtx := trace.SpanContextFromContext(ctx)
+    log.Printf("[Backend] Forwarding to backend. trace_id=%s span_id=%s user_id=%s", spanCtx.TraceID(), spanCtx.SpanID(), userID)
 
     backendURL := os.Getenv("BACKEND_URL")
     if backendURL == "" {
@@ -87,7 +101,6 @@ func forwardToBackend(userID, query string, channelID string, api *slack.Client)
 
     jsonData, err := json.Marshal(payload)
     if err != nil {
-        span.RecordError(err) // ⬅️ record error in trace
         log.Printf("Error marshaling request: %v\n", err)
         return
     }
@@ -100,30 +113,22 @@ func forwardToBackend(userID, query string, channelID string, api *slack.Client)
     defer resp.Body.Close()
 
     span.SetAttributes(attribute.String("http.status", resp.Status))
+    log.Printf("[Backend] Sent to backend. Status: %s", resp.Status)
 
-    log.Printf("Sent to backend. Status: %s\n", resp.Status)
-
-    // Now read the SSE stream and send messages to Slack
-    buf := make([]byte, 1024) // Adjust the buffer size if needed
+    buf := make([]byte, 1024)
     for {
         n, err := resp.Body.Read(buf)
-        if err != nil && err.Error() != "EOF" {
-            log.Printf("Error reading from SSE stream: %v\n", err)
-            break
-        }
-
         if n > 0 {
             message := string(buf[:n])
-            log.Printf("Received data from backend: %s", message)
+            log.Printf("[Backend] Received data from backend: %s", message)
 
-            // Send the message to Slack
             _, _, err := api.PostMessage(channelID, slack.MsgOptionText(message, false))
             if err != nil {
                 log.Printf("Error sending message to Slack: %v\n", err)
             }
         }
 
-        if err != nil && err.Error() == "EOF" {
+        if err != nil {
             break
         }
     }

@@ -8,7 +8,7 @@ import (
 
     "github.com/joho/godotenv"
     "chatrelay-go/internal/slack"
-    "chatrelay-go/internal/telemetry" // ⬅️ import your telemetry package
+    "chatrelay-go/internal/telemetry"
 )
 
 func init() {
@@ -23,11 +23,14 @@ func main() {
         port = "8081"
     }
 
-    shutdown := telemetry.InitTracer("chatrelay-bot")         // ⬅️ initialize tracer
-    defer shutdown(context.Background())                       // ⬅️ graceful shutdown
+    shutdown := telemetry.InitTracer("chatrelay-bot")
+    defer func() {
+        if err := shutdown(context.Background()); err != nil {
+            log.Fatalf("Failed to shutdown tracer: %v", err)
+        }
+    }()
 
     fmt.Printf("ChatRelay bot is starting on port %s...\n", port)
-
     ctx := context.Background()
     slack.StartSlackListener(ctx)
 }
