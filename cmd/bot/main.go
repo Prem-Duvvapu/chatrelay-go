@@ -4,7 +4,6 @@ import (
     "context"
     "fmt"
     "log"
-    "os"
 
     "github.com/joho/godotenv"
     "chatrelay-go/internal/slack"
@@ -18,11 +17,6 @@ func init() {
 }
 
 func main() {
-    port := os.Getenv("CHATRELAY_PORT")
-    if port == "" {
-        port = "8081"
-    }
-
     shutdown := telemetry.InitTracer("chatrelay-bot")
     defer func() {
         if err := shutdown(context.Background()); err != nil {
@@ -30,7 +24,7 @@ func main() {
         }
     }()
 
-    fmt.Printf("ChatRelay bot is starting on port %s...\n", port)
+    fmt.Printf("ChatRelay bot is starting...");
     ctx := context.Background()
     slack.StartSlackListener(ctx)
 }
