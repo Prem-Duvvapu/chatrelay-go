@@ -11,6 +11,9 @@ import (
     "github.com/slack-go/slack"
     "github.com/slack-go/slack/slackevents"
     "github.com/slack-go/slack/socketmode"
+
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/attribute"
 )
 
 func StartSlackListener(ctx context.Context) {
@@ -66,6 +69,11 @@ func StartSlackListener(ctx context.Context) {
 }
 
 func forwardToBackend(userID, query string, channelID string, api *slack.Client) {
+    ctx := context.Background()
+    tracer := otel.Tracer("chatrelay-tracer")
+    ctx, span := tracer.Start(ctx, "forwardToBackend") // ⬅️ start a span
+    defer span.End()
+
     backendURL := os.Getenv("BACKEND_URL")
     if backendURL == "" {
         log.Println("BACKEND_URL is not set")
@@ -79,6 +87,7 @@ func forwardToBackend(userID, query string, channelID string, api *slack.Client)
 
     jsonData, err := json.Marshal(payload)
     if err != nil {
+        span.RecordError(err) // ⬅️ record error in trace
         log.Printf("Error marshaling request: %v\n", err)
         return
     }
@@ -89,6 +98,8 @@ func forwardToBackend(userID, query string, channelID string, api *slack.Client)
         return
     }
     defer resp.Body.Close()
+
+    span.SetAttributes(attribute.String("http.status", resp.Status))
 
     log.Printf("Sent to backend. Status: %s\n", resp.Status)
 
