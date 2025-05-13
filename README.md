@@ -94,7 +94,7 @@ MOCK_BACKEND_PORT=8091
 **Step 1:** Clone and install dependencies
 
 ```bash
-git clone https://github.com/yourusername/chatrelay-go.git
+git clone https://github.com/Prem-Duvvapu/chatrelay-go.git
 cd chatrelay-go
 go mod tidy
 ```
