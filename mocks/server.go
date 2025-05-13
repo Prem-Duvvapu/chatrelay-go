@@ -28,7 +28,7 @@ func StartMockBackendServer() {
 
 
 func streamHandler(w http.ResponseWriter, r *http.Request) {
-	//Set headers for SSE
+	//Set headers
 	w.Header().Set("Content-Type","text/event-stream")
 	w.Header().Set("Cache-control","no-cache")
 	w.Header().Set("Connection","keep-alive")
@@ -54,6 +54,8 @@ func streamHandler(w http.ResponseWriter, r *http.Request) {
 	for i,word := range response {
 		fmt.Fprintf(w, "id: %d\ndata: %s\n\n", i+1, word)
 		flusher.Flush()
-		time.Sleep(500 * time.Millisecond) //simulate delay
+
+		//this is to simulate delay
+		time.Sleep(500 * time.Millisecond)
 	}
 }
